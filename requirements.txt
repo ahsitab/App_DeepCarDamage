@@ -5,7 +5,7 @@ Pillow
 matplotlib
 seaborn
 opencv-python
-tensorflow
+tensorflow-cpu
 torch
 ultralytics
 scikit-learn

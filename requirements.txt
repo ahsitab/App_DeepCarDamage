@@ -4,7 +4,7 @@ numpy
 Pillow
 matplotlib
 seaborn
-opencv-python
+opencv-python-headless
 tensorflow-cpu
 torch
 ultralytics

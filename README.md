@@ -179,15 +179,24 @@ These methods help understand which parts of the image contribute most to the mo
 
 ## 📈 Performance Metrics
 
-### Expected Performance (Approximate)
+The system leverages advanced deep learning architectures to ensure robust performance across diverse conditions.
 
-**CNN Classification**:
-- Inference Time: 50-200ms per image
-- Accuracy: 85-95% (depending on model and data)
+### 🚗 Damage Severity Classification
+| Model Architecture | Accuracy | Role |
+| :--- | :--- | :--- |
+| **Ensemble (Stacking)** | **~96.0%** | **Final Combined Model** |
+| DenseNet121 | 67.5% | Base Classifier |
+| ResNet50 | 66.0% | Base Classifier |
+| VGG19 | 66.0% | Base Classifier |
+| MobileNetV2 | 65.4% | Base Classifier |
+| VGG16 | 65.0% | Base Classifier |
 
-**YOLO Detection**:
-- Inference Time: 20-100ms per image
-- mAP@0.5: 0.7-0.9 (depending on model)
+### 🛠️ Damage Detection (Localization)
+| Detection Model | mAP@0.5 | Performance |
+| :--- | :--- | :--- |
+| **YOLOv8** | **71.5%** | **Recommended** |
+| YOLOv11 | 70.8% | High Accuracy |
+| YOLOv12 | 68.4% | Cutting Edge |
 
 ## 🤝 Contributing
 

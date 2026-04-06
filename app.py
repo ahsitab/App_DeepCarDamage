@@ -1,640 +1,348 @@
 import streamlit as st
 import os
+import time
 from PIL import Image
 import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-import time
-import cv2
-from utils.preprocessing import preprocess_image
-from utils.inference import load_model, predict_classification, predict_detection, TENSORFLOW_AVAILABLE
-from utils.xai import generate_xai_explanations
-from utils.yolo_utils import load_yolo_model, detect_objects, draw_bounding_boxes
-from utils.export_utils import export_results_to_csv, export_results_to_json, create_damage_report
-from utils.batch_processing import process_batch_images, create_batch_summary_report, validate_image_files
-from utils.model_comparison import compare_models_on_image
 
-# Set page configuration
+# --- PERFORMANCE OPTIMIZATION: ENV SETTINGS ---
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+os.environ['PYDEVD_DISABLE_FILE_VALIDATION'] = '1'
+
+# --- PAGE CONFIGURATION ---
 st.set_page_config(
-    page_title="DeepCarAnalysis",
+    page_title="DeepCar Analytics",
     page_icon="🚗",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Initialize session state for dark mode
-if 'dark_mode' not in st.session_state:
-    st.session_state.dark_mode = False
+# --- INITIALIZATION ---
+if 'reset_id' not in st.session_state:
+    st.session_state['reset_id'] = 0
 
-def toggle_dark_mode():
-    st.session_state.dark_mode = not st.session_state.dark_mode
-    st.rerun()
+# --- CONFIGURATION ---
+MODELS_DIR = "Models_Weight_files"
+DEFAULT_YOLO = "best(1)yolov12.pt"
+DEFAULT_CNN = "mobilenetv2_best.h5"
+LOGO_PATH = "C:/Users/User/.gemini/antigravity/brain/f2448669-8ffa-40b7-977d-e8feb6e2efc4/deepcar_analytics_logo_1775501117574.png"
 
-# Custom CSS for dark mode and styling
-def get_css():
-    if st.session_state.dark_mode:
-        return """
-        <style>
-            .main-header {
-                font-size: 2.5rem;
-                font-weight: bold;
-                background: linear-gradient(45deg, #FF6B6B, #4ECDC4, #45B7D1, #96CEB4);
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
-                background-clip: text;
-                text-align: center;
-                margin-bottom: 2rem;
-                text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-            }
-            .sub-header {
-                font-size: 1.5rem;
-                font-weight: bold;
-                background: linear-gradient(45deg, #FF9800, #FF5722, #FFC107);
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
-                background-clip: text;
-                margin-bottom: 1rem;
-            }
-            .card {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                padding: 1rem;
-                border-radius: 0.5rem;
-                box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-                margin-bottom: 1rem;
-                color: white;
-                border: 1px solid rgba(255,255,255,0.1);
-            }
-            .prediction-box {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                padding: 1rem;
-                border-radius: 0.5rem;
-                border-left: 4px solid #FF6B6B;
-                margin-bottom: 1rem;
-                color: white;
-                box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-            }
-            body {
-                background: linear-gradient(135deg, #0F0C29 0%, #302B63 50%, #24243e 100%);
-                color: white;
-            }
-            .stTabs [data-baseweb="tab-list"] {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                border-radius: 0.5rem;
-            }
-            .stTabs [data-baseweb="tab"] {
-                color: white;
-                font-weight: bold;
-            }
-            .stButton>button {
-                background: linear-gradient(45deg, #FF6B6B, #4ECDC4);
-                color: white;
-                border: none;
-                border-radius: 0.5rem;
-                font-weight: bold;
-                transition: all 0.3s ease;
-            }
-            .stButton>button:hover {
-                transform: translateY(-2px);
-                box-shadow: 0 4px 15px rgba(255,107,107,0.4);
-            }
-            .stMetric {
-                background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%);
-                border-radius: 0.5rem;
-                padding: 1rem;
-                border: 1px solid rgba(255,255,255,0.1);
-            }
-        </style>
-        """
-    else:
-        return """
-        <style>
-            .main-header {
-                font-size: 2.5rem;
-                font-weight: bold;
-                background: linear-gradient(45deg, #FF6B6B, #4ECDC4, #45B7D1, #96CEB4, #FFEAA7, #DDA0DD);
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
-                background-clip: text;
-                text-align: center;
-                margin-bottom: 2rem;
-                text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
-            }
-            .sub-header {
-                font-size: 1.5rem;
-                font-weight: bold;
-                background: linear-gradient(45deg, #FF9800, #FF5722, #FFC107, #FFEB3B);
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
-                background-clip: text;
-                margin-bottom: 1rem;
-            }
-            .card {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                padding: 1rem;
-                border-radius: 0.5rem;
-                box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-                margin-bottom: 1rem;
-                color: white;
-                border: 1px solid rgba(255,255,255,0.2);
-            }
-            .prediction-box {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                padding: 1rem;
-                border-radius: 0.5rem;
-                border-left: 4px solid #FF6B6B;
-                margin-bottom: 1rem;
-                color: white;
-                box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-            }
-            body {
-                background: linear-gradient(135deg, #74b9ff 0%, #0984e3 50%, #00cec9 100%);
-                color: #2d3436;
-            }
-            .stTabs [data-baseweb="tab-list"] {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                border-radius: 0.5rem;
-            }
-            .stTabs [data-baseweb="tab"] {
-                color: white;
-                font-weight: bold;
-            }
-            .stButton>button {
-                background: linear-gradient(45deg, #FF6B6B, #4ECDC4);
-                color: white;
-                border: none;
-                border-radius: 0.5rem;
-                font-weight: bold;
-                transition: all 0.3s ease;
-            }
-            .stButton>button:hover {
-                transform: translateY(-2px);
-                box-shadow: 0 4px 15px rgba(255,107,107,0.4);
-            }
-            .stMetric {
-                background: linear-gradient(135deg, rgba(255,255,255,0.8) 0%, rgba(255,255,255,0.6) 100%);
-                border-radius: 0.5rem;
-                padding: 1rem;
-                border: 1px solid rgba(0,0,0,0.1);
-                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            }
-            .stDataFrame {
-                border-radius: 0.5rem;
-                overflow: hidden;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            }
-        </style>
-        """
+# --- CUSTOM CSS FOR MODERN UI ---
+def apply_custom_css():
+    st.markdown("""
+    <style>
+        .stApp {
+            background-color: #0d1117;
+            color: #e6edf3;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .glass-card {
+            background: rgba(22, 27, 34, 0.85);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.2rem;
+        }
+        
+        .main-header {
+            color: #3b82f6;
+            font-size: 3rem;
+            font-weight: 800;
+            text-align: center;
+            margin-bottom: 0px;
+        }
+        
+        .sub-header-text {
+            text-align: center;
+            color: #8b949e;
+            font-size: 1.1rem;
+            margin-bottom: 2rem;
+        }
+        
+        [data-testid="stSidebar"] {
+            background-color: #010409;
+        }
+        
+        .severity-badge {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            border-radius: 50px;
+            font-weight: 700;
+            text-transform: uppercase;
+            font-size: 0.8rem;
+            color: white;
+        }
+        .minor { background: #238636; }
+        .moderate { background: #9e6a03; }
+        .severe { background: #da3633; }
+    </style>
+    """, unsafe_allow_html=True)
 
-st.markdown(get_css(), unsafe_allow_html=True)
+apply_custom_css()
 
-# Main title
-st.markdown('<div class="main-header">🚗 DeepCarAnalysis</div>', unsafe_allow_html=True)
-st.markdown('<p style="text-align: center; font-size: 1.2rem; color: #666;">AI-Powered Vehicle Detection & Classification System</p>', unsafe_allow_html=True)
-
-# Dark mode toggle
-col1, col2, col3 = st.columns([1, 1, 1])
-with col2:
-    if st.button("🌙 Dark Mode" if not st.session_state.dark_mode else "☀️ Light Mode"):
-        toggle_dark_mode()
-
-# Create tabs
-tab1, tab2, tab3, tab4 = st.tabs(["🔍 Single Image Analysis", "📦 Batch Processing", "⚖️ Model Comparison", "📊 Performance Dashboard"])
-
-# Sidebar
-st.sidebar.title("🚗 DeepCarAnalysis")
-st.sidebar.markdown("---")
-
-# Model selection
-st.sidebar.markdown("### Model Selection")
-models_dir = "Models_Weight_files"
-
-try:
-    if os.path.exists(models_dir):
-        cnn_models = [f for f in os.listdir(models_dir) if f.endswith('.h5')]
-        yolo_models = [f for f in os.listdir(models_dir) if f.endswith('.pt')]
-    else:
-        st.sidebar.error(f"⚠️ Models directory '{models_dir}' not found!")
-        st.sidebar.info("Please create the Models_Weight_files directory and add your model files.")
-        cnn_models = []
-        yolo_models = []
-except Exception as e:
-    st.sidebar.error(f"⚠️ Error loading models: {str(e)}")
-    cnn_models = []
-    yolo_models = []
-
-available_options = ["YOLO Detection"]
-if TENSORFLOW_AVAILABLE and cnn_models:
-    available_options.insert(0, "CNN Classification")
-
-model_type = st.sidebar.radio("Select Analysis Type:", available_options)
-
-if not TENSORFLOW_AVAILABLE and model_type == "CNN Classification":
-    st.sidebar.error("⚠️ TensorFlow is not available. CNN Classification is disabled.")
-    st.sidebar.info("Please install TensorFlow to enable CNN classification features.")
-
-if model_type == "CNN Classification":
-    selected_model = st.sidebar.selectbox("Select CNN Model:", cnn_models if cnn_models else ["No models available"])
-    if selected_model != "No models available":
-        model_path = os.path.join(models_dir, selected_model)
-        model_name = selected_model.replace('_best.h5', '').replace('.h5', '').upper()
-
-        # Model info
-        st.sidebar.markdown("### Model Information")
-        st.sidebar.write(f"**Architecture:** {model_name}")
-        st.sidebar.write(f"**Input Size:** 224x224")
-        st.sidebar.write(f"**Classes:** 3 (Minor, Moderate, Severe)")
-
-elif model_type == "YOLO Detection":
-    selected_model = st.sidebar.selectbox("Select YOLO Model:", yolo_models if yolo_models else ["No models available"])
-    if selected_model != "No models available":
-        model_path = os.path.join(models_dir, selected_model)
-        model_name = selected_model.replace('best', '').replace('.pt', '').replace('(', '').replace(')', '').upper()
-
-        # Model info
-        st.sidebar.markdown("### Model Information")
-        st.sidebar.write(f"**Architecture:** {model_name}")
-        st.sidebar.write(f"**Input Size:** 640x640")
-        st.sidebar.write(f"**Task:** Object Detection")
-        st.sidebar.write(f"**Path:** {model_path}")
-
-# Image upload
-st.sidebar.markdown("---")
-st.sidebar.markdown("### Image Input")
-uploaded_file = st.sidebar.file_uploader("Upload Image", type=["jpg", "jpeg", "png"])
-sample_images = ["sample1.jpg", "sample2.jpg", "sample3.jpg"]
-selected_sample = st.sidebar.selectbox("Or select sample image:", ["None"] + sample_images)
-
-# Single Image Analysis Tab
-with tab1:
-    st.markdown('<div class="sub-header">📷 Image Preview</div>', unsafe_allow_html=True)
-
-    if uploaded_file is not None:
-        image = Image.open(uploaded_file)
-        st.image(image, caption="Uploaded Image", use_container_width=True)
-    elif selected_sample != "None":
-        image_path = os.path.join("assets", selected_sample)
-        if os.path.exists(image_path):
-            image = Image.open(image_path)
-            st.image(image, caption="Sample Image", use_container_width=True)
+# ---SIDEBAR & NAVIGATION ---
+with st.sidebar:
+    try:
+        if os.path.exists(LOGO_PATH):
+            st.image(LOGO_PATH, width=220)
         else:
-            st.warning("Sample image not found.")
-    else:
-        st.info("Please upload an image or select a sample.")
+            st.markdown('<div class="main-header" style="font-size: 1.8rem; text-align: left;">DeepCar</div>', unsafe_allow_html=True)
+    except Exception:
+        st.markdown('<div class="main-header" style="font-size: 1.8rem; text-align: left;">DeepCar</div>', unsafe_allow_html=True)
 
-    # Analysis section after image preview
-    if 'image' in locals():
-        st.markdown('<div class="sub-header">🔍 Analysis Results</div>', unsafe_allow_html=True)
+    st.markdown("---")
+    st.info("⚡ Parallel Mode Active")
+    
+    st.markdown("### 📷 Analysis Input")
+    uploaded_file = st.file_uploader("Upload Target", type=["jpg", "jpeg", "png"], key=f"uploader_{st.session_state.reset_id}")
+    
+    sample_dir = "assets"
+    samples = []
+    if os.path.exists(sample_dir):
+        samples = [f for f in os.listdir(sample_dir) if f.endswith(('.jpg', '.jpeg', '.png'))]
+    
+    selected_sample = st.selectbox("Sample Selector", ["None"] + samples, key=f"sample_{st.session_state.reset_id}")
+        
+    st.markdown("---")
+    st.caption("DeepCar Analytics v2.0.7")
 
-        # Preprocess image
-        processed_image = preprocess_image(image, model_type)
+# --- HEADER ---
+st.markdown('<div class="main-header">DeepCar Analytics</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header-text">Unified Structural Localization & Severity Pipeline</div>', unsafe_allow_html=True)
 
-        if model_type == "CNN Classification" and TENSORFLOW_AVAILABLE:
-            # Load model
-            model = load_model(model_path)
+# --- APP TABS ---
+tab1, tab2, tab3 = st.tabs(["🔍 Analysis Terminal", "📚 Multiple Image Analysis", "📊 System Performance"])
 
-            # Make prediction
-            predictions = predict_classification(model, processed_image)
+# --- CACHED MODEL LOADERS ---
+@st.cache_resource
+def get_yolo_model(path):
+    from utils.yolo_utils import load_yolo_model
+    return load_yolo_model(path)
 
-            # Display results
-            st.markdown('<div class="prediction-box">', unsafe_allow_html=True)
-            st.markdown("### Classification Results")
+@st.cache_resource
+def get_cnn_model(path):
+    from utils.inference import load_model
+    return load_model(path)
 
-            # Top prediction
-            top_class = predictions[0]['class']
-            top_conf = predictions[0]['confidence']
-            st.success(f"**Predicted Class:** {top_class} ({top_conf:.2f}%)")
+# --- CORE ANALYSIS LOGIC ---
+def run_unified_inference(image):
+    import numpy as np
+    import cv2
+    from utils.preprocessing import preprocess_image
+    from utils.yolo_utils import detect_objects
+    from utils.inference import predict_classification
+    
+    # Convert PIL to BGR for OpenCV compatibility
+    image_np = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+    yolo_path = os.path.join(MODELS_DIR, DEFAULT_YOLO)
+    cnn_path = os.path.join(MODELS_DIR, DEFAULT_CNN)
+    
+    # 1. Detection Stream
+    yolo_model = get_yolo_model(yolo_path)
+    detections = detect_objects(yolo_model, image_np, 0.25)
+    
+    # 2. Classification Stream
+    cnn_model = get_cnn_model(cnn_path)
+    processed_cnn = preprocess_image(image, "CNN Classification")
+    predictions = predict_classification(cnn_model, processed_cnn)
+    
+    return detections, predictions, image_np
 
-            # All predictions
-            st.markdown("#### All Predictions:")
-            for pred in predictions:
-                st.markdown(f"- {pred['class']}: {pred['confidence']:.2f}%")
-                st.progress(pred['confidence'] / 100)
+# --- TAB 1: SINGLE ANALYSIS ---
+with tab1:
+    from PIL import Image
+    target_image = None
+    if uploaded_file is not None:
+        target_image = Image.open(uploaded_file)
+    elif selected_sample != "None":
+        sample_dir = "assets"
+        target_image = Image.open(os.path.join(sample_dir, selected_sample))
 
-            st.markdown('</div>', unsafe_allow_html=True)
+    col_view, col_diag = st.columns([1.2, 1], gap="large")
+    
+    with col_view:
+        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+        st.markdown("#### 🔘 Visual Feed")
+        if target_image:
+            st.image(target_image, caption="Current Target", width=450)
+            
+            # Action Buttons Row
+            bc1, bc2 = st.columns(2)
+            with bc1:
+                if st.button("🚀 EXECUTE FULL SCAN", use_container_width=True):
+                    with st.spinner("Analyzing structural integrity..."):
+                        detections, predictions, image_np = run_unified_inference(target_image)
+                        st.session_state['parallel_results'] = (detections, predictions, image_np)
+            with bc2:
+                if st.button("🆕 NEW ANALYSIS", use_container_width=True):
+                    # FULL RESET: Re-instantiate input widgets by changing their ID
+                    if 'parallel_results' in st.session_state:
+                        del st.session_state['parallel_results']
+                    st.session_state['reset_id'] += 1
+                    st.rerun()
+        else:
+            st.info("Awaiting input image...")
+        st.markdown('</div>', unsafe_allow_html=True)
 
-            # XAI Explanations
-            if st.checkbox("Show Explainable AI (XAI)"):
-                st.markdown("### Explainable AI")
-                xai_methods = st.multiselect("Select XAI Methods:",
-                                           ["Grad-CAM", "Grad-CAM++", "Eigen-CAM"],
-                                           default=["Grad-CAM"])
-
-                if xai_methods:
-                    explanations = generate_xai_explanations(model, processed_image, xai_methods)
-
-                    # Display explanations in grid
-                    cols = st.columns(len(explanations))
-                    for i, (method, exp_img) in enumerate(explanations.items()):
-                        with cols[i]:
-                            st.image(exp_img, caption=f"{method} Explanation", use_container_width=True)
-
-        elif model_type == "YOLO Detection":
-            # Load model
-            model = load_yolo_model(model_path)
-
-            # Detection parameters
-            conf_threshold = st.slider("Confidence Threshold", 0.1, 1.0, 0.25, 0.05)
-
-            # Make prediction
-            detections = detect_objects(model, processed_image, conf_threshold)
-
-            # Display results
-            st.markdown('<div class="prediction-box">', unsafe_allow_html=True)
-            st.markdown("### 🚗 Car Damage Detection Results")
-
+    with col_diag:
+        if 'parallel_results' in st.session_state and target_image:
+            detections, predictions, image_np = st.session_state['parallel_results']
+            
+            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+            st.markdown("#### 📡 Analytic Results")
+            
+            # PARALLEL VIEW: CNN | YOLO SUMMARY
+            col_sev, col_det = st.columns(2)
+            
+            with col_sev:
+                st.markdown("##### 🔬 Severity")
+                top_class = predictions[0]['class']
+                sc_key = top_class.lower().split('-')[-1]
+                st.markdown(f"<div class='severity-badge {sc_key}' style='width: 100%; text-align: center;'>{top_class}</div>", unsafe_allow_html=True)
+                
+            with col_det:
+                st.markdown("##### 📦 Detections")
+                st.metric("Total Damage", len(detections))
+            
+            st.markdown("---")
+            
+            # DAMAGE LOG (Interchanged to appear before map)
+            st.markdown("##### 📝 Damage Log")
             if detections:
-                # Overall assessment
-                damage_counts = {}
-                total_damage_area = 0
-
-                for det in detections:
-                    damage_type = det['damage_type']
-                    damage_counts[damage_type] = damage_counts.get(damage_type, 0) + 1
-                    total_damage_area += det['area']
-
-                # Display summary
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Total Damages", len(detections))
-                with col2:
-                    most_common = max(damage_counts, key=damage_counts.get)
-                    st.metric("Primary Damage", most_common)
-                with col3:
-                    severity_score = sum(1 if d['damage_type'] == 'Severe Damage' else 0.5 if d['damage_type'] == 'Moderate Damage' else 0.2 for d in detections)
-                    st.metric("Severity Score", f"{severity_score:.1f}")
-
-                # Damage breakdown
-                st.markdown("#### 📊 Damage Analysis")
-                damage_df = []
-                for det in detections:
-                    damage_df.append({
-                        'Damage Type': det['damage_type'],
-                        'Specific Class': det['class'],
-                        'Confidence': f"{det['confidence']:.1f}%",
-                        'Area': f"{det['area']:.0f}px²"
-                    })
-
-                st.dataframe(damage_df, use_container_width=True)
-
-                # Display image with bounding boxes
-                annotated_image = draw_bounding_boxes(processed_image, detections)
-                # Convert BGR to RGB for Streamlit
-                annotated_image_rgb = cv2.cvtColor(annotated_image, cv2.COLOR_BGR2RGB)
-                st.image(annotated_image_rgb, caption="🔍 Detected Damages", use_container_width=True)
-
-                # Export options
-                st.markdown("#### 📥 Export Results")
-                col1, col2 = st.columns(2)
-                with col1:
-                    csv_data = export_results_to_csv(detections, uploaded_file.name if uploaded_file else selected_sample, {'filename': selected_model})
-                    if csv_data:
-                        st.download_button(
-                            label="📊 Download CSV",
-                            data=csv_data,
-                            file_name=f"{uploaded_file.name.split('.')[0] if uploaded_file else selected_sample.split('.')[0]}_analysis.csv",
-                            mime="text/csv"
-                        )
-                with col2:
-                    json_data = export_results_to_json(detections, uploaded_file.name if uploaded_file else selected_sample, {'filename': selected_model})
-                    if json_data:
-                        st.download_button(
-                            label="📋 Download JSON",
-                            data=json_data,
-                            file_name=f"{uploaded_file.name.split('.')[0] if uploaded_file else selected_sample.split('.')[0]}_analysis.json",
-                            mime="application/json"
-                        )
-
+                import pandas as pd
+                st.dataframe(pd.DataFrame([{
+                    'Damage Type': d['damage_type'], 
+                    'Confidence': f"{d['confidence']:.1f}%"
+                } for d in detections]), use_container_width=True)
             else:
-                st.warning("⚠️ No damages detected with current threshold. Try lowering the confidence threshold.")
+                st.info("No structural anomalies logged.")
 
+            # LOCALIZATION MAP (Interchanged to appear after log)
+            st.markdown("##### 🔍 Localization Map")
+            if detections:
+                from utils.yolo_utils import draw_bounding_boxes
+                import cv2
+                # image_np is in BGR from run_unified_inference
+                annotated = draw_bounding_boxes(image_np, detections)
+                st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), width=450)
+                
+                # EXPORT WIDGETS
+                st.markdown("##### 📥 Export Data")
+                from utils.export_utils import export_results_to_csv, export_results_to_json
+                ec1, ec2 = st.columns(2)
+                fname = uploaded_file.name if uploaded_file else selected_sample
+                with ec1:
+                    st.download_button("📊 CSV", data=export_results_to_csv(detections, fname, {'m': 'unified'}), file_name=f"report.csv", use_container_width=True)
+                with ec2:
+                    st.download_button("📋 JSON", data=export_results_to_json(detections, fname, {'m': 'unified'}), file_name=f"report.json", use_container_width=True)
+            else:
+                st.warning("No localization data available for this target.")
+            
             st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="glass-card" style="height: 300px; display: flex; align-items: center; justify-content: center; flex-direction: column; text-align: center;"><h4>System Standby</h4><p>Execute scan to populate parallel diagnostics</p></div>', unsafe_allow_html=True)
 
-    else:
-        st.info("Upload an image to start analysis.")
-
-# Batch Processing Tab
+# --- OTHER TABS ---
+# --- TAB 2: MULTIPLE IMAGE ANALYSIS ---
 with tab2:
-    st.markdown('<div class="sub-header">📦 Batch Image Processing</div>', unsafe_allow_html=True)
-    st.markdown("Upload multiple images for batch analysis")
-
-    batch_files = st.file_uploader("Upload Images", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
-
+    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+    st.markdown("#### 📚 Multiple Image Analysis")
+    st.markdown("Upload multiple images to perform a unified structural scan across the entire batch.")
+    
+    batch_files = st.file_uploader("Select Batch Images", type=["jpg", "jpeg", "png"], accept_multiple_files=True, key=f"batch_uploader_{st.session_state.reset_id}")
+    
     if batch_files:
-        st.success(f"📁 {len(batch_files)} images uploaded for batch processing")
-
-        # Batch processing parameters
-        col1, col2 = st.columns(2)
-        with col1:
-            batch_conf_threshold = st.slider("Confidence Threshold", 0.1, 1.0, 0.5, 0.1, key="batch_conf")
-        with col2:
-            batch_model = st.selectbox("Select Model for Batch Processing", yolo_models if yolo_models else ["No models available"], key="batch_model")
-
-        if st.button("🚀 Start Batch Processing") and batch_model != "No models available":
-            with st.spinner("Processing images..."):
-                # Save uploaded files temporarily
-                temp_dir = "temp_batch"
-                os.makedirs(temp_dir, exist_ok=True)
-
-                image_paths = []
-                for uploaded_file in batch_files:
-                    temp_path = os.path.join(temp_dir, uploaded_file.name)
-                    with open(temp_path, "wb") as f:
-                        f.write(uploaded_file.getvalue())
-                    image_paths.append(temp_path)
-
-                # Process batch
-                batch_results = process_batch_images(
-                    image_paths,
-                    os.path.join(models_dir, batch_model),
-                    batch_conf_threshold
-                )
-
-                if batch_results:
-                    # Display summary
-                    st.success("✅ Batch processing completed!")
-
-                    summary = create_batch_summary_report(batch_results)
-                    if summary:
-                        col1, col2, col3, col4 = st.columns(4)
-                        with col1:
-                            st.metric("Total Images", summary['total_images_processed'])
-                        with col2:
-                            st.metric("Images with Detections", summary['images_with_detections'])
-                        with col3:
-                            st.metric("Total Detections", summary['total_detections'])
-                        with col4:
-                            st.metric("Avg Severity Score", f"{summary['average_severity_score']:.2f}")
-
-                    # Display detailed results
-                    st.markdown("#### 📋 Detailed Results")
-                    results_df = []
-                    for result in batch_results['image_results']:
-                        results_df.append({
-                            'Image': result['image_name'],
-                            'Detections': result['num_detections'],
-                            'Status': result['status'],
-                            'Severity Score': result['report']['severity_score'] if result['report'] else 0
-                        })
-
-                    st.dataframe(results_df, use_container_width=True)
-
-                    # Display processed images with detections
-                    st.markdown("#### 🖼️ Processed Images")
-                    cols = st.columns(2)  # Display 2 images per row
-
-                    for i, result in enumerate(batch_results['image_results']):
-                        if result['status'] == 'success' and result['detections']:
-                            # Load original image
-                            try:
-                                original_image = Image.open(result['image_path'])
-                                processed_image = preprocess_image(original_image, "YOLO Detection")
-
-                                # Draw bounding boxes
-                                model = load_yolo_model(os.path.join(models_dir, batch_model))
-                                annotated_image = draw_bounding_boxes(processed_image, result['detections'])
-                                annotated_image_rgb = cv2.cvtColor(annotated_image, cv2.COLOR_BGR2RGB)
-
-                                with cols[i % 2]:
-                                    st.image(annotated_image_rgb,
-                                           caption=f"{result['image_name']} - {result['num_detections']} detections",
-                                           use_container_width=True)
-                                    st.markdown(f"**Severity Score:** {result['report']['severity_score']:.1f}" if result['report'] else "**No Report**")
-
-                            except Exception as e:
-                                with cols[i % 2]:
-                                    st.error(f"Error displaying {result['image_name']}: {str(e)}")
-
-                    # Cleanup
-                    import shutil
-                    shutil.rmtree(temp_dir)
+        st.markdown(f"**Batch Size:** {len(batch_files)} images selected.")
+        
+        # Batch Action Buttons
+        bcol1, bcol2 = st.columns(2)
+        with bcol1:
+            if st.button("🚀 EXECUTE BATCH ANALYSIS", use_container_width=True):
+                batch_results = []
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                for i, file in enumerate(batch_files):
+                    status_text.text(f"Processing {file.name}... ({i+1}/{len(batch_files)})")
+                    from PIL import Image
+                    img = Image.open(file)
+                    
+                    # Run unified inference
+                    detections, predictions, image_np = run_unified_inference(img)
+                    
+                    # Collect summary data
+                    batch_results.append({
+                        'Filename': file.name,
+                        'Severity': predictions[0]['class'],
+                        'Confidence': f"{predictions[0]['confidence']:.1f}%",
+                        'Total Detections': len(detections),
+                        'detections': detections,
+                        'image_np': image_np
+                    })
+                    progress_bar.progress((i + 1) / len(batch_files))
+                
+                st.session_state['batch_analysis_results'] = batch_results
+                status_text.success(f"Batch Analysis Complete! Processed {len(batch_files)} targets.")
+        
+        with bcol2:
+            if st.button("🆕 NEW BATCH ANALYSIS", use_container_width=True):
+                if 'batch_analysis_results' in st.session_state:
+                    del st.session_state['batch_analysis_results']
+                st.session_state['reset_id'] += 1
+                st.rerun()
+    
+    # Display Summary Table if results exist
+    if 'batch_analysis_results' in st.session_state:
+        results = st.session_state['batch_analysis_results']
+        import pandas as pd
+        summary_df = pd.DataFrame([{
+            'Filename': r['Filename'],
+            'Severity Category': r['Severity'],
+            'Score': r['Confidence'],
+            'Anomalies': r['Total Detections']
+        } for r in results])
+        
+        st.markdown("---")
+        st.markdown("#### 📊 Batch Summary Report")
+        st.dataframe(summary_df, use_container_width=True)
+        
+        # Detailed Inspector
+        st.markdown("---")
+        st.markdown("#### 🔍 Detail Inspector")
+        inspect_file = st.selectbox("Select file to inspect:", [r['Filename'] for r in results])
+        
+        if inspect_file:
+            selected_res = next(r for r in results if r['Filename'] == inspect_file)
+            icol1, icol2 = st.columns(2)
+            
+            with icol1:
+                from utils.yolo_utils import draw_bounding_boxes
+                import cv2
+                ann = draw_bounding_boxes(selected_res['image_np'], selected_res['detections'])
+                st.image(cv2.cvtColor(ann, cv2.COLOR_BGR2RGB), caption=f"Localization: {inspect_file}", width=450)
+            
+            with icol2:
+                st.markdown(f"##### 📋 Diagnostic Summary")
+                st.write(f"**Target:** `{inspect_file}`")
+                st.write(f"**Unified Severity:** {selected_res['Severity']}")
+                st.write(f"**Total Structural Anomalies:** `{selected_res['Total Detections']}`")
+                
+                if selected_res['detections']:
+                    import pandas as pd
+                    inspector_df = pd.DataFrame([{
+                        'Damage Type': d['damage_type'], 
+                        'Confidence': f"{d['confidence']:.1f}%"
+                    } for d in selected_res['detections']])
+                    st.dataframe(inspector_df, use_container_width=True, hide_index=True)
                 else:
-                    st.error("❌ Batch processing failed")
+                    st.info("No anomalies detected for this target.")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
-# Model Comparison Tab
 with tab3:
-    st.markdown('<div class="sub-header">⚖️ Model Comparison</div>', unsafe_allow_html=True)
-    st.markdown("Compare different models on the same image")
+    st.markdown('<div class="glass-card"><h4>📊 System Performance</h4><p>Real-time neural telemetry and model latency monitoring (Coming Soon).</p></div>', unsafe_allow_html=True)
 
-    # Model selection for comparison
-    available_models = yolo_models if yolo_models else []
-    selected_models = st.multiselect("Select Models to Compare", available_models, max_selections=3)
-
-    if len(selected_models) >= 2:
-        # Image selection
-        comp_uploaded_file = st.file_uploader("Upload Image for Comparison", type=["jpg", "jpeg", "png"], key="comp_upload")
-        comp_sample = st.selectbox("Or select sample image:", ["None"] + sample_images, key="comp_sample")
-
-        if comp_uploaded_file or comp_sample != "None":
-            # Load image
-            if comp_uploaded_file:
-                comp_image = Image.open(comp_uploaded_file)
-                image_name = comp_uploaded_file.name
-            else:
-                image_path = os.path.join("assets", comp_sample)
-                if os.path.exists(image_path):
-                    comp_image = Image.open(image_path)
-                    image_name = comp_sample
-                else:
-                    st.error("Sample image not found")
-                    comp_image = None
-
-            if comp_image is not None:
-                st.image(comp_image, caption="Comparison Image", width=300)
-
-                if st.button("🔍 Compare Models"):
-                    with st.spinner("Comparing models..."):
-                        model_paths = [os.path.join(models_dir, model) for model in selected_models]
-                        comparison_results = compare_models_on_image(comp_image, model_paths, selected_models)
-
-                        if comparison_results:
-                            # Display comparison results
-                            st.markdown("#### 📊 Comparison Results")
-
-                            comp_df = []
-                            for result in comparison_results['model_results']:
-                                comp_df.append({
-                                    'Model': result['model_name'],
-                                    'Detections': result['num_detections'],
-                                    'Processing Time': f"{result['processing_time']:.3f}s",
-                                    'Avg Confidence': f"{result['avg_confidence']:.2f}%"
-                                })
-
-                            st.dataframe(comp_df, use_container_width=True)
-
-                            # Performance metrics
-                            st.markdown("#### ⚡ Performance Metrics")
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                st.metric("Fastest Model", comparison_results['metrics']['fastest_model'])
-                            with col2:
-                                st.metric("Slowest Model", comparison_results['metrics']['slowest_model'])
-                            with col3:
-                                st.metric("Avg Processing Time", f"{comparison_results['metrics']['avg_processing_time']:.3f}s")
-
-                            # Display comparison visualizations
-                            st.markdown("#### 📊 Model Comparison Visualizations")
-
-                            # Display processed images for each model
-                            st.markdown("##### 🖼️ Detection Results by Model")
-                            for result in comparison_results['model_results']:
-                                if result['detections']:
-                                    st.markdown(f"**{result['model_name']}** - {result['num_detections']} detections")
-
-                                    # Load and process image for this model
-                                    try:
-                                        processed_image = preprocess_image(comp_image, "YOLO Detection")
-                                        model = load_yolo_model(result['model_path'])
-                                        annotated_image = draw_bounding_boxes(processed_image, result['detections'])
-                                        annotated_image_rgb = cv2.cvtColor(annotated_image, cv2.COLOR_BGR2RGB)
-
-                                        st.image(annotated_image_rgb,
-                                               caption=f"{result['model_name']} - {result['num_detections']} detections (Time: {result['processing_time']:.3f}s)",
-                                               use_container_width=True)
-                                    except Exception as e:
-                                        st.error(f"Error displaying results for {result['model_name']}: {str(e)}")
-                                else:
-                                    st.markdown(f"**{result['model_name']}** - No detections found")
-                        else:
-                            st.error("Comparison failed")
-
-# Performance Dashboard Tab
-with tab4:
-    st.markdown('<div class="sub-header">📊 Performance Dashboard</div>', unsafe_allow_html=True)
-
-    # System info
-    st.markdown("#### 🖥️ System Information")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Models Available", len(cnn_models) + len(yolo_models))
-    with col2:
-        st.metric("CNN Models", len(cnn_models))
-    with col3:
-        st.metric("YOLO Models", len(yolo_models))
-
-    # Model details
-    if cnn_models or yolo_models:
-        st.markdown("#### 📋 Available Models")
-
-        model_info = []
-        for model in cnn_models:
-            model_info.append({
-                'Type': 'CNN',
-                'Name': model.replace('_best.h5', '').replace('.h5', '').upper(),
-                'File': model,
-                'Size': f"{os.path.getsize(os.path.join(models_dir, model)) / (1024*1024):.2f} MB"
-            })
-
-        for model in yolo_models:
-            model_info.append({
-                'Type': 'YOLO',
-                'Name': model.replace('best', '').replace('.pt', '').replace('(', '').replace(')', '').upper(),
-                'File': model,
-                'Size': f"{os.path.getsize(os.path.join(models_dir, model)) / (1024*1024):.2f} MB"
-            })
-
-        st.dataframe(model_info, use_container_width=True)
-
-# Footer
+# --- FOOTER ---
 st.markdown("---")
-st.markdown('<p style="text-align: center; color: #666;">© 2024 DeepCarAnalysis - AI-Powered Vehicle Analysis</p>', unsafe_allow_html=True)
+st.markdown('<p style="text-align: center; color: #484f58; font-size: 0.8rem;">DEEPCAR ANALYTICS ECOSYSTEM | v2.0.4 | STABLE</p>', unsafe_allow_html=True)

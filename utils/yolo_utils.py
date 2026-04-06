@@ -1,19 +1,11 @@
 import numpy as np
-import cv2
-from ultralytics import YOLO
-import torch
 
 def load_yolo_model(model_path):
     """
     Load a YOLO model from file.
-
-    Args:
-        model_path: Path to the YOLO model file (.pt)
-
-    Returns:
-        Loaded YOLO model
     """
     try:
+        from ultralytics import YOLO
         model = YOLO(model_path)
         return model
     except Exception as e:
@@ -22,17 +14,10 @@ def load_yolo_model(model_path):
 def detect_objects(model, image, conf_threshold=0.25):
     """
     Perform car damage detection using YOLO model.
-
-    Args:
-        model: Loaded YOLO model
-        image: Preprocessed image array (OpenCV format)
-        conf_threshold: Confidence threshold for detections (lowered to 0.25 for better detection)
-
-    Returns:
-        List of detections with bounding boxes, classes, and confidence scores
     """
     try:
-        # Run inference with lower confidence threshold
+        import torch
+        # Run inference
         results = model(image, conf=conf_threshold, verbose=False, iou=0.45)
 
         detections = []
@@ -101,6 +86,7 @@ def draw_bounding_boxes(image, detections):
         Image with bounding boxes drawn
     """
     try:
+        import cv2
         img_copy = image.copy()
 
         # Color mapping for different classes
@@ -203,6 +189,8 @@ def preprocess_for_yolo(image, target_size=(640, 640)):
     Returns:
         Preprocessed image
     """
+    from PIL import Image
+    import cv2
     # Convert PIL to OpenCV if needed
     if isinstance(image, Image.Image):
         image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)

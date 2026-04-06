@@ -1,26 +1,13 @@
-try:
-    import tensorflow as tf
-    from tensorflow.keras.models import load_model
-    from tensorflow.keras.applications import VGG16, VGG19, ResNet50, DenseNet121, MobileNetV2
-    TENSORFLOW_AVAILABLE = True
-except ImportError:
-    TENSORFLOW_AVAILABLE = False
-    print("Warning: TensorFlow not available. CNN classification will not work.")
-
+TENSORFLOW_AVAILABLE = True
 import numpy as np
 
 def load_model(model_path):
     """
     Load a TensorFlow/Keras model from file.
-
-    Args:
-        model_path: Path to the model file (.h5)
-
-    Returns:
-        Loaded model
     """
     try:
-        model = load_model(model_path)
+        from tensorflow.keras.models import load_model as keras_load_model
+        model = keras_load_model(model_path)
         return model
     except Exception as e:
         raise ValueError(f"Error loading model from {model_path}: {str(e)}")
@@ -28,15 +15,9 @@ def load_model(model_path):
 def predict_classification(model, image):
     """
     Make classification prediction using CNN model.
-
-    Args:
-        model: Loaded TensorFlow model
-        image: Preprocessed image array
-
-    Returns:
-        List of predictions with class names and confidence scores
     """
     try:
+        import tensorflow as tf
         # Make prediction
         predictions = model.predict(image, verbose=0)
 

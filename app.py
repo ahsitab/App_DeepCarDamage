@@ -162,7 +162,9 @@ def run_unified_inference(image):
     # 1. Detection Stream
     yolo_model = get_yolo_model(yolo_path)
     if yolo_model is not None:
-        detections = detect_objects(yolo_model, image_np, 0.25)
+        # Lower threshold to 0.1 for initial Cloud verification
+        detections = detect_objects(yolo_model, image_np, 0.10)
+        st.sidebar.write(f"Raw Detections: {len(detections)}")
     else:
         detections = []
         st.sidebar.warning("YOLO Engine Unavailable")

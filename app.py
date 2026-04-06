@@ -25,7 +25,7 @@ if 'reset_id' not in st.session_state:
 MODELS_DIR = "Models_Weight_files"
 DEFAULT_YOLO = "best(1)yolov12.pt"
 DEFAULT_CNN = "mobilenetv2_best.h5"
-LOGO_PATH = "C:/Users/User/.gemini/antigravity/brain/f2448669-8ffa-40b7-977d-e8feb6e2efc4/deepcar_analytics_logo_1775501117574.png"
+LOGO_PATH = "assets/logo.png"
 
 # --- CUSTOM CSS FOR MODERN UI ---
 def apply_custom_css():

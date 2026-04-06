@@ -94,6 +94,19 @@ with st.sidebar:
     st.markdown("---")
     st.info("⚡ Parallel Mode Active")
     
+    # SYSTEM INTEGRITY CHECK
+    y_path = os.path.join(MODELS_DIR, DEFAULT_YOLO)
+    c_path = os.path.join(MODELS_DIR, DEFAULT_CNN)
+    y_ok = os.path.exists(y_path)
+    c_ok = os.path.exists(c_path)
+    
+    with st.expander("🛡️ System Integrity", expanded=False):
+        st.markdown(f"**YOLO File:** {'✅' if y_ok else '❌'}")
+        st.markdown(f"**CNN File:** {'✅' if c_ok else '❌'}")
+        if not (y_ok and c_ok):
+            st.error("Weights missing or incorrect filename.")
+            st.caption(f"Path: {MODELS_DIR}")
+    
     st.markdown("### 📷 Analysis Input")
     uploaded_file = st.file_uploader("Upload Target", type=["jpg", "jpeg", "png"], key=f"uploader_{st.session_state.reset_id}")
     
@@ -117,13 +130,21 @@ tab1, tab2, tab3 = st.tabs(["🔍 Analysis Terminal", "📚 Multiple Image Analy
 # --- CACHED MODEL LOADERS ---
 @st.cache_resource
 def get_yolo_model(path):
-    from utils.yolo_utils import load_yolo_model
-    return load_yolo_model(path)
+    try:
+        from utils.yolo_utils import load_yolo_model
+        return load_yolo_model(path)
+    except Exception as e:
+        st.sidebar.error(f"Failed to load YOLO: {str(e)}")
+        return None
 
 @st.cache_resource
 def get_cnn_model(path):
-    from utils.inference import load_model
-    return load_model(path)
+    try:
+        from utils.inference import load_model
+        return load_model(path)
+    except Exception as e:
+        st.sidebar.error(f"Failed to load CNN: {str(e)}")
+        return None
 
 # --- CORE ANALYSIS LOGIC ---
 def run_unified_inference(image):
@@ -140,12 +161,20 @@ def run_unified_inference(image):
     
     # 1. Detection Stream
     yolo_model = get_yolo_model(yolo_path)
-    detections = detect_objects(yolo_model, image_np, 0.25)
+    if yolo_model is not None:
+        detections = detect_objects(yolo_model, image_np, 0.25)
+    else:
+        detections = []
+        st.sidebar.warning("YOLO Engine Unavailable")
     
     # 2. Classification Stream
     cnn_model = get_cnn_model(cnn_path)
-    processed_cnn = preprocess_image(image, "CNN Classification")
-    predictions = predict_classification(cnn_model, processed_cnn)
+    if cnn_model is not None:
+        processed_cnn = preprocess_image(image, "CNN Classification")
+        predictions = predict_classification(cnn_model, processed_cnn)
+    else:
+        predictions = [{'class': 'Unknown', 'confidence': 0.0}]
+        st.sidebar.warning("CNN Engine Unavailable")
     
     return detections, predictions, image_np
 

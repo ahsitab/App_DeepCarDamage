@@ -6,34 +6,44 @@ from PIL import Image
 import io
 import base64
 
-def export_results_to_csv(detections, image_path, model_info):
+def export_results_to_csv(detections, image_path, model_info, classification_results=None):
     """
-    Export detection results to CSV format.
-
-    Args:
-        detections: List of detection results
-        image_path: Path to the analyzed image
-        model_info: Dictionary with model information
-
-    Returns:
-        CSV string content
+    Export detection and classification results to CSV format.
     """
     try:
-        # Prepare data for CSV
         csv_data = []
-        for det in detections:
+        
+        # 1. Add Detection Data
+        if detections:
+            for det in detections:
+                csv_data.append({
+                    'Image': os.path.basename(image_path),
+                    'Type': 'Detection',
+                    'Damage_Type': det.get('damage_type', 'Unknown'),
+                    'Specific_Class': det.get('class', 'N/A'),
+                    'Confidence': f"{det.get('confidence', 0):.2f}%",
+                    'Area_px2': det.get('area', 0),
+                    'Metadata': f"BBox: {det.get('bbox', [])}",
+                    'Unified_Severity': classification_results[0]['class'] if classification_results else 'N/A',
+                    'Timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                })
+        
+        # 2. If no detections, still provide a baseline row with Classification
+        if not csv_data and classification_results:
             csv_data.append({
                 'Image': os.path.basename(image_path),
-                'Damage_Type': det['damage_type'],
-                'Specific_Class': det['class'],
-                'Confidence': det['confidence'],
-                'Area_px2': det['area'],
-                'Bounding_Box': f"[{det['bbox'][0]}, {det['bbox'][1]}, {det['bbox'][2]}, {det['bbox'][3]}]",
-                'Center_X': det['center'][0],
-                'Center_Y': det['center'][1],
-                'Model': model_info.get('filename', 'Unknown'),
+                'Type': 'Classification Only',
+                'Damage_Type': 'N/A',
+                'Specific_Class': 'N/A',
+                'Confidence': 'N/A',
+                'Area_px2': 0,
+                'Metadata': 'No structural anomalies detected',
+                'Unified_Severity': classification_results[0]['class'],
                 'Timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             })
+
+        if not csv_data:
+            return None
 
         df = pd.DataFrame(csv_data)
         return df.to_csv(index=False)
@@ -41,29 +51,23 @@ def export_results_to_csv(detections, image_path, model_info):
         print(f"Error creating CSV: {str(e)}")
         return None
 
-def export_results_to_json(detections, image_path, model_info, analysis_summary=None):
+def export_results_to_json(detections, image_path, model_info, analysis_summary=None, classification_results=None):
     """
-    Export detection results to JSON format.
-
-    Args:
-        detections: List of detection results
-        image_path: Path to the analyzed image
-        model_info: Dictionary with model information
-        analysis_summary: Optional summary statistics
-
-    Returns:
-        JSON string content
+    Export detection and classification results to JSON format.
     """
     try:
         export_data = {
             'metadata': {
                 'image': os.path.basename(image_path),
-                'model': model_info.get('filename', 'Unknown'),
+                'models': model_info,
                 'timestamp': datetime.now().isoformat(),
-                'total_detections': len(detections)
+                'total_detections': len(detections) if detections else 0
             },
-            'analysis_summary': analysis_summary or {},
-            'detections': detections
+            'severity_analysis': classification_results or [],
+            'detections': detections or [],
+            'summary': analysis_summary or {
+                'status': 'Success' if (detections or classification_results) else 'No data'
+            }
         }
 
         return json.dumps(export_data, indent=2, default=str)

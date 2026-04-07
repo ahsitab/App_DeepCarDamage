@@ -97,15 +97,29 @@ with st.sidebar:
     # SYSTEM INTEGRITY CHECK
     y_path = os.path.join(MODELS_DIR, DEFAULT_YOLO)
     c_path = os.path.join(MODELS_DIR, DEFAULT_CNN)
-    y_ok = os.path.exists(y_path)
-    c_ok = os.path.exists(c_path)
     
-    with st.expander("🛡️ System Integrity", expanded=False):
-        st.markdown(f"**YOLO File:** {'✅' if y_ok else '❌'}")
-        st.markdown(f"**CNN File:** {'✅' if c_ok else '❌'}")
-        if not (y_ok and c_ok):
-            st.error("Weights missing or incorrect filename.")
-            st.caption(f"Path: {MODELS_DIR}")
+    y_exists = os.path.exists(y_path)
+    c_exists = os.path.exists(c_path)
+    
+    # LFS Pointer Check (Files < 1024 bytes are likely pointers)
+    y_size = os.path.getsize(y_path) if y_exists else 0
+    c_size = os.path.getsize(c_path) if c_exists else 0
+    
+    y_ok = y_exists and y_size > 1024
+    c_ok = c_exists and c_size > 1024
+    
+    with st.expander("🛡️ System Integrity", expanded=not (y_ok and c_ok)):
+        st.markdown(f"**YOLO Model:** {'✅' if y_ok else '❌'}")
+        if y_exists and not y_ok:
+            st.warning("YOLO weight file is too small. Possibly a Git LFS pointer.")
+            
+        st.markdown(f"**CNN Model:** {'✅' if c_ok else '❌'}")
+        if c_exists and not c_ok:
+            st.warning("CNN weight file is too small. Possibly a Git LFS pointer.")
+            
+        if not (y_exists and c_exists):
+            st.error("Model files missing in deployment.")
+            st.caption(f"Target Directory: {MODELS_DIR}")
     
     st.markdown("### 📷 Analysis Input")
     uploaded_file = st.file_uploader("Upload Target", type=["jpg", "jpeg", "png"], key=f"uploader_{st.session_state.reset_id}")
@@ -148,11 +162,15 @@ def get_cnn_model(path):
 
 # --- CORE ANALYSIS LOGIC ---
 def run_unified_inference(image):
+    import time
     import numpy as np
     import cv2
     from utils.preprocessing import preprocess_image
     from utils.yolo_utils import detect_objects
     from utils.inference import predict_classification
+    
+    metrics = {}
+    start_total = time.perf_counter()
     
     # Convert PIL to BGR for OpenCV compatibility
     image_np = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
@@ -162,23 +180,26 @@ def run_unified_inference(image):
     # 1. Detection Stream
     yolo_model = get_yolo_model(yolo_path)
     if yolo_model is not None:
-        # Lower threshold to 0.1 for initial Cloud verification
+        start_yolo = time.perf_counter()
         detections = detect_objects(yolo_model, image_np, 0.10)
-        st.sidebar.write(f"Raw Detections: {len(detections)}")
+        metrics['yolo_latency'] = round((time.perf_counter() - start_yolo) * 1000, 2)  # ms
     else:
         detections = []
-        st.sidebar.warning("YOLO Engine Unavailable")
+        metrics['yolo_latency'] = 0
     
     # 2. Classification Stream
     cnn_model = get_cnn_model(cnn_path)
     if cnn_model is not None:
+        start_cnn = time.perf_counter()
         processed_cnn = preprocess_image(image, "CNN Classification")
         predictions = predict_classification(cnn_model, processed_cnn)
+        metrics['cnn_latency'] = round((time.perf_counter() - start_cnn) * 1000, 2)  # ms
     else:
         predictions = [{'class': 'Unknown', 'confidence': 0.0}]
-        st.sidebar.warning("CNN Engine Unavailable")
+        metrics['cnn_latency'] = 0
     
-    return detections, predictions, image_np
+    metrics['total_latency'] = round((time.perf_counter() - start_total) * 1000, 2)
+    return detections, predictions, image_np, metrics
 
 # --- TAB 1: SINGLE ANALYSIS ---
 with tab1:
@@ -203,8 +224,9 @@ with tab1:
             with bc1:
                 if st.button("🚀 EXECUTE FULL SCAN", use_container_width=True):
                     with st.spinner("Analyzing structural integrity..."):
-                        detections, predictions, image_np = run_unified_inference(target_image)
+                        detections, predictions, image_np, metrics = run_unified_inference(target_image)
                         st.session_state['parallel_results'] = (detections, predictions, image_np)
+                        st.session_state['last_metrics'] = metrics
             with bc2:
                 if st.button("🆕 NEW ANALYSIS", use_container_width=True):
                     # FULL RESET: Re-instantiate input widgets by changing their ID
@@ -249,7 +271,41 @@ with tab1:
             else:
                 st.info("No structural anomalies logged.")
 
-            # LOCALIZATION MAP (Interchanged to appear after log)
+            # EXPORT WIDGETS
+            st.markdown("##### 📥 Export Data")
+            from utils.export_utils import export_results_to_csv, export_results_to_json
+            ec1, ec2 = st.columns(2)
+            fname = uploaded_file.name if uploaded_file else selected_sample
+            
+            # Prepare models info for export
+            m_info = {
+                'yolo': DEFAULT_YOLO,
+                'cnn': DEFAULT_CNN,
+                'timestamp': time.strftime("%Y%m%d-%H%M%S")
+            }
+            
+            with ec1:
+                csv_data = export_results_to_csv(detections, fname, m_info, predictions)
+                st.download_button(
+                    "📊 CSV Report", 
+                    data=csv_data if csv_data else "", 
+                    file_name=f"DeepCar_Report_{m_info['timestamp']}.csv", 
+                    use_container_width=True,
+                    disabled=csv_data is None
+                )
+            with ec2:
+                json_data = export_results_to_json(detections, fname, m_info, None, predictions)
+                st.download_button(
+                    "📋 JSON Report", 
+                    data=json_data if json_data else "", 
+                    file_name=f"DeepCar_Report_{m_info['timestamp']}.json", 
+                    use_container_width=True,
+                    disabled=json_data is None
+                )
+            
+            st.markdown("---")
+            
+            # LOCALIZATION MAP
             st.markdown("##### 🔍 Localization Map")
             if detections:
                 from utils.yolo_utils import draw_bounding_boxes
@@ -257,16 +313,6 @@ with tab1:
                 # image_np is in BGR from run_unified_inference
                 annotated = draw_bounding_boxes(image_np, detections)
                 st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), width=450)
-                
-                # EXPORT WIDGETS
-                st.markdown("##### 📥 Export Data")
-                from utils.export_utils import export_results_to_csv, export_results_to_json
-                ec1, ec2 = st.columns(2)
-                fname = uploaded_file.name if uploaded_file else selected_sample
-                with ec1:
-                    st.download_button("📊 CSV", data=export_results_to_csv(detections, fname, {'m': 'unified'}), file_name=f"report.csv", use_container_width=True)
-                with ec2:
-                    st.download_button("📋 JSON", data=export_results_to_json(detections, fname, {'m': 'unified'}), file_name=f"report.json", use_container_width=True)
             else:
                 st.warning("No localization data available for this target.")
             
@@ -300,7 +346,7 @@ with tab2:
                     img = Image.open(file)
                     
                     # Run unified inference
-                    detections, predictions, image_np = run_unified_inference(img)
+                    detections, predictions, image_np, metrics = run_unified_inference(img)
                     
                     # Collect summary data
                     batch_results.append({
@@ -372,7 +418,53 @@ with tab2:
     st.markdown('</div>', unsafe_allow_html=True)
 
 with tab3:
-    st.markdown('<div class="glass-card"><h4>📊 System Performance</h4><p>Real-time neural telemetry and model latency monitoring (Coming Soon).</p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+    st.markdown("#### 📊 System Performance & Neural Telemetry")
+    
+    from utils.system_utils import get_system_metrics, get_model_file_info
+    sys_metrics = get_system_metrics()
+    
+    # 1. LIVE INFERENCE METRICS
+    st.markdown("##### ⚡ Real-Time Latency")
+    if 'last_metrics' in st.session_state:
+        m = st.session_state['last_metrics']
+        mc1, mc2, mc3 = st.columns(3)
+        with mc1:
+            st.metric("YOLO Detection", f"{m['yolo_latency']}ms")
+        with mc2:
+            st.metric("CNN Classification", f"{m['cnn_latency']}ms")
+        with mc3:
+            st.metric("Total Pipeline", f"{m['total_latency']}ms", delta_color="inverse")
+    else:
+        st.info("No inference data in current session. Execute a scan to view latency.")
+    
+    st.markdown("---")
+    
+    # 2. HARDWARE TELEMETRY
+    st.markdown("##### 💻 Hardware Utilization")
+    if 'error' not in sys_metrics:
+        hc1, hc2, hc3 = st.columns(3)
+        with hc1:
+            st.metric("CPU Usage", f"{sys_metrics['cpu_usage']}%")
+        with hc2:
+            st.metric("RAM Available", f"{sys_metrics['ram_total'] - sys_metrics['ram_used']:.1f} GB", f"Used: {sys_metrics['ram_percent']}%", delta_color="inverse")
+        with hc3:
+            st.write(f"**OS:** {sys_metrics['os']}")
+            st.write(f"**Core Count:** {sys_metrics['cpu_count']}")
+    else:
+        st.error(f"Hardware telemetry unavailable: {sys_metrics['error']}")
+        
+    st.markdown("---")
+    
+    # 3. MODEL REGISTRY
+    st.markdown("##### 📦 Model Registry")
+    models_info = get_model_file_info(MODELS_DIR, [DEFAULT_YOLO, DEFAULT_CNN])
+    
+    import pandas as pd
+    m_df = pd.DataFrame(models_info)
+    st.table(m_df[['name', 'size_mb', 'status']])
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # --- FOOTER ---
 st.markdown("---")

@@ -23,7 +23,7 @@ if 'reset_id' not in st.session_state:
 
 # --- CONFIGURATION ---
 MODELS_DIR = "Models_Weight_files"
-DEFAULT_YOLO = "best(1)yolov12.pt"
+DEFAULT_YOLO = "best_yolov12.pt"
 DEFAULT_CNN = "mobilenetv2_best.h5"
 LOGO_PATH = "assets/logo.png"
 

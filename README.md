@@ -43,7 +43,7 @@ DeepCarAnalysis/
     ├── mobilenetv2_best.h5
     ├── bestyolov8.pt
     ├── best(1)yolov11.pt
-    └── best(1)yolov12.pt
+    └── best_yolov12.pt
 ```
 
 ## 🚀 Installation & Setup

@@ -9,6 +9,13 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 os.environ['PYDEVD_DISABLE_FILE_VALIDATION'] = '1'
 
+# Set Matplotlib to Agg backend for headless Streamlit Cloud
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+except ImportError:
+    pass
+
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
     page_title="DeepCar Analytics",
@@ -147,8 +154,13 @@ def get_yolo_model(path):
     try:
         from utils.yolo_utils import load_yolo_model
         return load_yolo_model(path)
+    except ImportError as e:
+        st.sidebar.error(f"❌ YOLO Dependency Error: {str(e)}")
+        return None
     except Exception as e:
-        st.sidebar.error(f"Failed to load YOLO: {str(e)}")
+        st.sidebar.error(f"❌ Failed to load YOLO: {str(e)}")
+        if "Models_Weight_files" in str(e):
+             st.sidebar.warning("Check if models were downloaded correctly via Git LFS")
         return None
 
 @st.cache_resource
@@ -156,8 +168,13 @@ def get_cnn_model(path):
     try:
         from utils.inference import load_model
         return load_model(path)
+    except ImportError as e:
+        st.sidebar.error(f"❌ CNN Dependency Error: {str(e)}")
+        return None
     except Exception as e:
-        st.sidebar.error(f"Failed to load CNN: {str(e)}")
+        st.sidebar.error(f"❌ Failed to load CNN: {str(e)}")
+        if "Models_Weight_files" in str(e):
+             st.sidebar.warning("Check if models were downloaded correctly via Git LFS")
         return None
 
 # --- CORE ANALYSIS LOGIC ---

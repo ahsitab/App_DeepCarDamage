@@ -9,7 +9,7 @@ venv/
 bin/
 lib/
 include/
-.streamlit/
+# .streamlit/
 .ipynb_checkpoints/
 temp_batch/
 .DS_Store
